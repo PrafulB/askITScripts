@@ -11,7 +11,13 @@ import {
   ArticleLink
 } from './interfaceTypes'
 
-const ES_HOST = '18.222.55.46:9200'
+const ES_USERNAME = 'es4askit'
+const ES_PASSWORD = 'codyGo4'
+const ES_HOST = [{
+  host: '18.216.253.76',
+  port: '80',
+  auth: ES_USERNAME + ':' + ES_PASSWORD
+}]
 const ARTICLE_INDEX_NAME = 'askit'
 const ARTICLE_TYPE_NAME = 'kb'
 const SUGGESTIONS_INDEX_NAME = 'suggestions'
@@ -25,11 +31,10 @@ const INITIAL_SUGGESTIONS_LIST: Suggestion = {
 }
 
 const ARTICLE_SIZE_THRESHOLD_FOR_MESSAGE = 200
-
 const dialogFlowAPIBasePath = 'https://api.dialogflow.com/v1'
 const intentsEndpoint = '/intents'
 const versioningParam = "?v=20170712"
-const DEVELOPER_ACCESS_TOKEN = '249f1ae954f0421ab2b3e84979d066fa'
+const DEVELOPER_ACCESS_TOKEN = process.argv[2] === 'prod' ? '249f1ae954f0421ab2b3e84979d066fa' : '4e911d4bfbce43dbbc7cda08bcead4c8'
 
 const utterancePrefixPhrases = [
   '',
@@ -148,37 +153,48 @@ function generateUtteranceSentences(query: string): Array < Utterance > {
 }
 
 // Instantiates and returns an Elasticsearch client object.
-function instantiateElasticsearch(host: string): es.Client {
-  return new es.Client({
-    host
-  })
+function instantiateElasticsearch(host: object): es.Client {
+  let x: es.Client
+  try {
+    x = new es.Client({
+      host
+    })
+  } catch (err) {
+    console.log(err)
+  }
+  return x
 }
 // Get data from Elasticsearch corresponding to the suggestion ID passed.
 async function getDataFromES(suggestion: Suggestion): Promise < any > {
   let response: es.GetResponse < {} >
-    await esClient.ping({
-      requestTimeout: 1000,
-    })
-
-  if (!suggestion.endpoint) {
-    try {
+  const clusterUp = await esClient.ping({
+    // ping usually has a 3000ms timeout
+    requestTimeout: 1000
+  })
+  
+  if (!clusterUp) {
+    console.trace('elasticsearch cluster is down!');
+  } else {
+    if (!suggestion.endpoint) {
+      try {
+        response = await esClient.get({
+          index: SUGGESTIONS_INDEX_NAME,
+          type: SUGGESTIONS_TYPE_NAME,
+          id: suggestion.next
+        })
+      } catch (err) {
+        console.log(suggestion)
+      }
+    } else {
       response = await esClient.get({
-        index: SUGGESTIONS_INDEX_NAME,
-        type: SUGGESTIONS_TYPE_NAME,
+        index: ARTICLE_INDEX_NAME,
+        type: ARTICLE_TYPE_NAME,
         id: suggestion.next
       })
-    } catch (err) {
-      console.log(suggestion)
     }
-  } else {
-    response = await esClient.get({
-      index: ARTICLE_INDEX_NAME,
-      type: ARTICLE_TYPE_NAME,
-      id: suggestion.next
-    })
+  
+    return response._source
   }
-
-  return response._source
 }
 
 // Call the Dialogflow Create Intent API with the generated intent.
@@ -442,6 +458,7 @@ async function main() {
   for (let suggestion of initialSuggestionsList.suggestions) {
     recurseOverSuggestions(suggestion, [])
   }
+  console.log('DONE!')
 }
 
 const esClient = instantiateElasticsearch(ES_HOST)

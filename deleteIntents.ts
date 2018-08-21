@@ -3,7 +3,7 @@ import axios from 'axios'
 const dialogFlowAPIBasePath = 'https://api.dialogflow.com/v1'
 const intentsEndpoint = '/intents'
 const versioningParam = '?v=20170712'
-const DEVELOPER_ACCESS_TOKEN = '4e911d4bfbce43dbbc7cda08bcead4c8'
+const DEVELOPER_ACCESS_TOKEN = process.argv[2] === 'prod' ? '249f1ae954f0421ab2b3e84979d066fa' : '4e911d4bfbce43dbbc7cda08bcead4c8'
 
 axios({
     method: 'get',

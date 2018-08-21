@@ -10,8 +10,15 @@ const TYPE_NAME = 'kb';
 const univService = '';
 const apiPath = 'https://nyudev.service-now.com/api/neyu/knowledge_for_bot/articles?univ_service=';
 
+const ES_USERNAME = 'es4askit'
+const ES_PASSWORD = 'codyGo4'
+const ES_HOST = [{
+  host: '18.216.253.76',
+  port: 80,
+  auth: ES_USERNAME + ':' + ES_PASSWORD
+}]
 const client = new es.Client({
-  host: '18.222.55.46:9200',
+  host: ES_HOST,
   log: 'warning',
 });
 
