@@ -21,18 +21,22 @@ const client = new es.Client({
   host: ES_HOST,
   log: 'warning',
 });
+const ES_BULK_LIMIT = 100;
 
 function createBulk(results, servicesMapping) {
-  const body = [];
-  results.forEach((item) => {
-    body.push({
+  const bulksList = [];
+  results.forEach((item, index) => {
+    if (index % ES_BULK_LIMIT === 0) {
+      bulksList[bulksList.length] = [];
+    }
+    bulksList[bulksList.length - 1].push({
       index: {
         _index: INDEX_NAME,
         _type: TYPE_NAME,
         _id: item.kb_id,
       },
     });
-    body.push({
+    bulksList[bulksList.length - 1].push({
       serviceId: parseInt(servicesMapping[item.UniversityService], 10),
       serviceName: item.UniversityService,
       description: unescape(item.short_description) || '',
@@ -42,9 +46,17 @@ function createBulk(results, servicesMapping) {
       solutionUrl: unescape(item.url) || '',
     });
 
-    // console.log(typeof (body[body.length - 1].service));
+    // console.log(typeof (bulksList[bulksList.length - 1].service));
   });
-  return body;
+  return bulksList;
+}
+
+function makeESRequests(bulksList) {
+  const esInsertRequests = [];
+  bulksList.forEach((body) => {
+    esInsertRequests.push(client.bulk({ body }));
+  })
+  return Promise.all(esInsertRequests);
 }
 
 client.ping({
@@ -67,10 +79,10 @@ client.ping({
     fs.writeFile(path.join(__dirname, 'serviceToIdMapping.json'), JSON.stringify(uniqueServicesObj));
 
     const body = createBulk(resp.data.results, uniqueServicesObj);
-    return client.bulk({ body });
+    return makeESRequests(body);
   })
   .then((respOfBulk) => {
-    console.log('Bulk Insert', respOfBulk.items.length);
+    console.log('Bulk Insert');
   })
   .catch((err) => {
     console.log('ERROR OCCURRED!', err);
