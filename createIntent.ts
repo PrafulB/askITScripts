@@ -1,5 +1,6 @@
 import axios from 'axios'
 import * as es from 'elasticsearch'
+import * as limit from 'simple-rate-limiter'
 
 import {
   Suggestion,
@@ -30,7 +31,8 @@ const INITIAL_SUGGESTIONS_LIST: Suggestion = {
   endpoint: false
 }
 
-const ARTICLE_SIZE_THRESHOLD_FOR_MESSAGE = 200
+const INTENTS_TO_CREATE_PER_BATCH = 45
+const MINUTE = 1000*60
 const dialogFlowAPIBasePath = 'https://api.dialogflow.com/v1'
 const intentsEndpoint = '/intents'
 const versioningParam = "?v=20170712"
@@ -111,6 +113,8 @@ const customContexts = {
     "name": "feedback"
   }
 }
+
+let insertedCount = 0
 
 axios.interceptors.request.use(request => {
   // console.log('\nBody:\n', JSON.stringify(request.data))
@@ -198,19 +202,19 @@ async function getDataFromES(suggestion: Suggestion): Promise < any > {
 }
 
 // Call the Dialogflow Create Intent API with the generated intent.
-function createDialogflowIntent(intents: Array < Intent > ): void {
-  intents.forEach((intent) => {
-    axios({
-      method: 'post',
-      url: dialogFlowAPIBasePath + intentsEndpoint + versioningParam,
-      data: intent,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + DEVELOPER_ACCESS_TOKEN
-      }
-    }).catch((err) => {
-      console.log(err.response.data)
-    })
+async function createDialogflowIntent(intent: Intent ): Promise<void> {
+  axios({
+    method: 'post',
+    url: dialogFlowAPIBasePath + intentsEndpoint + versioningParam,
+    data: intent,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + DEVELOPER_ACCESS_TOKEN
+    }
+  })
+  .then(() => console.log(`Inserted Intent ${++insertedCount}`))
+  .catch((err) => {
+    console.log(err.response.data)
   })
 }
 
@@ -437,28 +441,42 @@ async function generateIntent(suggestion: Suggestion, selectedSuggestions: Array
   return intents
 }
 
-// For each suggestion, create a standalone Dialogflow intent and a contextual Dialogflow intent. Then get the 
-// next level suggestions for that suggestion (if not an endpoint) and similarly recurse.
-async function recurseOverSuggestions(suggestion: Suggestion, suggestionsList: Array < string > ): Promise < void > {
+async function recurseOverSuggestions(suggestion: Suggestion, suggestionsList: Array < string > ): Promise < Intent[] > {
+  // For each suggestion, create a standalone Dialogflow intent and a contextual Dialogflow intent. Then get the 
+  // next level suggestions for that suggestion (if not an endpoint) and similarly recurse.
 
+  let allIntents = []
   const nextData = await getDataFromES(suggestion)
   const intents = await generateIntent(suggestion, suggestionsList, nextData)
-  createDialogflowIntent(intents)
+  allIntents = allIntents.concat(intents)
 
+  // await createDialogflowIntent(intents)
   if (!suggestion.endpoint) {
     const suggestionsListNew = suggestionsList.concat(removeSpecialChars(suggestion.key, true))
     for (let subSuggestion of nextData.suggestions) {
-      recurseOverSuggestions(subSuggestion, suggestionsListNew)
+      const subIntents = await recurseOverSuggestions(subSuggestion, suggestionsListNew)
+      allIntents = allIntents.concat(subIntents)
     }
   }
+  return allIntents;
 }
 
 async function main() {
-  let initialSuggestionsList = await getDataFromES(INITIAL_SUGGESTIONS_LIST)
+  //Get the first level suggestions from Elasticsearch and call recursor to get
+  // the info of each of the suggestions.
+
+  const initialSuggestionsList = await getDataFromES(INITIAL_SUGGESTIONS_LIST)
+  let allIntents = []
   for (let suggestion of initialSuggestionsList.suggestions) {
-    recurseOverSuggestions(suggestion, [])
+    const intents = await recurseOverSuggestions(suggestion, [])
+    allIntents = allIntents.concat(intents)
   }
-  console.log('DONE!')
+  
+  const createIntentInDialogflow = limit(createDialogflowIntent).to(INTENTS_TO_CREATE_PER_BATCH).per(MINUTE)
+  allIntents.forEach((intent, index) => {
+    createIntentInDialogflow(intent)
+  })
+  
 }
 
 const esClient = instantiateElasticsearch(ES_HOST)

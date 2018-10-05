@@ -44,6 +44,7 @@ function createBulk(results, servicesMapping) {
       keywords: unescape(item.keywords) || '',
       solution: unescape(item.solution) || '',
       solutionUrl: unescape(item.url) || '',
+      contexts: [0],
     });
 
     // console.log(typeof (bulksList[bulksList.length - 1].service));
